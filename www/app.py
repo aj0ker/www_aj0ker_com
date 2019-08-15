@@ -13,31 +13,31 @@ logging.basicConfig(level=logging.INFO)     #指定info级别通知
 
 import asyncio,os,json,time
 import orm
-
 from datetime import datetime
 from aiohttp import web
 from jinja2 import Environment,FileSystemLoader
 from coroweb import add_routes,add_static
 from models import Blog
 from config import configs
+from handlers import cookie2user,COOKIE_NAME
 
 
-#编写处理函数
-def index(request):     #该函数作用是处理URL，之后将与具体URL绑定。参数aiohttp.web.request实例包含了所有浏览器发送过来的HTTP协议里面的信息，一般不用自己构造
-    summary = 'Lorem ipsum dolor sit amet,consectetur adipisicing elit,sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'
-    blogs = [
-        Blog(id='1',name='Test Blog',summary=summary,created_at=time.time()-120),
-        Blog(id='2',name='Something New',summary=summary,created_at=time.time()-3600),
-        Blog(id='3',name='Learn Python',summary=summary,created_at=time.time()-7200)
-    ]
-    return {
-        '__template__':'blogs.html',
-        'blogs':blogs
-    }
-    #response反馈回服务器网页信息，网页的HTML源码就在body中
-    #返回值aiohttp.web.response实例，由web.Response(body='')构造，继承自StreamResponse，功能为构造一个HTTP响应
-    #类声明class aiohttp.web.Response(*,status=200,headers=None,content_type=None,body=None,text=None)
-    #HTTP协议格式为：POST /PATH /1.1 /r/n Header1:Value /r/n .. /r/n HeaderN:Value /r/n Body:Data
+# #编写处理函数
+# def index(request):     #该函数作用是处理URL，之后将与具体URL绑定。参数aiohttp.web.request实例包含了所有浏览器发送过来的HTTP协议里面的信息，一般不用自己构造
+#     summary = 'Lorem ipsum dolor sit amet,consectetur adipisicing elit,sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'
+#     blogs = [
+#         Blog(id='1',name='Test Blog',summary=summary,created_at=time.time()-120),
+#         Blog(id='2',name='Something New',summary=summary,created_at=time.time()-3600),
+#         Blog(id='3',name='Learn Python',summary=summary,created_at=time.time()-7200)
+#     ]
+#     return {
+#         '__template__':'blogs.html',
+#         'blogs':blogs
+#     }
+#     #response反馈回服务器网页信息，网页的HTML源码就在body中
+#     #返回值aiohttp.web.response实例，由web.Response(body='')构造，继承自StreamResponse，功能为构造一个HTTP响应
+#     #类声明class aiohttp.web.Response(*,status=200,headers=None,content_type=None,body=None,text=None)
+#     #HTTP协议格式为：POST /PATH /1.1 /r/n Header1:Value /r/n .. /r/n HeaderN:Value /r/n Body:Data
 
 def init_jinja2(app,**kw):
     logging.info('init jinja2..')
@@ -61,23 +61,54 @@ def init_jinja2(app,**kw):
         app['__templating__'] = env
 
 # middleware拦截器，一个URL在被函数处理前，可以经过一系列的middleware处理。
-#记录URL日志的logger定义如下
-@asyncio.coroutine
-def logger_factory(app,handler):
-    @asyncio.coroutine
-    def logger(request):
+# 记录URL日志的logger定义如下
+#@asyncio.coroutine
+async def logger_factory(app,handler):
+#    @asyncio.coroutine
+    async def logger(request):
         logging.info('Request: %s %s' % (request.method,request.path))
         # yield from asyncio.sleep(0.3)
-        return (yield from handler(request))
+        return await handler(request)
     return logger
 
+#@asyncio.coroutine
+async def auth_factory(app,handler):
+#    @asyncio.coroutine
+    async def auth(request):
+        logging.info('check user: %s %s' % (request.method,request.path))
+        request.__user__ = None
+        cookie_str = request.cookies.get(COOKIE_NAME)
+        if cookie_str:
+            user = await cookie2user(cookie_str)
+            if user:
+                logging.info('set current user: %s' % user.email)
+                request.__user__ = user
+        if request.path.startswith('/manage/') and (request.__user__ is None or not request.__user__.admin):
+            return web.HTTPFound('/signin')
+        return await handler(request)
+    return auth
+
+#@asyncio.coroutine
+async def data_factory(app,handler):
+#    @asyncio.coroutine
+    async def parse_data(request):
+        if request.method == 'POST':
+            if request.content_type.startswith('application/json'):
+                request.__data__ = await request.json()
+                logging.info('request json: %s' % str(request.__data__))
+            elif request.content_type.startswith('application/x-www-form-urlencode'):
+                request.__data__ = await request.post()
+                logging.info('request form: %s' % str(request.__data__))
+        return await handler(request)
+    return parse_data
+
 # response这个middleware把返回值转换为web.Response对象再返回，以保证满足aiohttp要求
-@asyncio.coroutine
-def response_factory(app,handler):
-    @asyncio.coroutine
-    def response(request):
+#@asyncio.coroutine
+async def response_factory(app,handler):
+#    @asyncio.coroutine
+    async def response(request):
         logging.info('Response handler..')
-        r = yield from handler(request)
+        r = await handler(request)
         if isinstance(r,web.StreamResponse):
             return r
         if isinstance(r,bytes):
@@ -101,11 +132,11 @@ def response_factory(app,handler):
                 resp = web.Response(body=app['__templating__'].get_template(template).render(**r).encode('utf-8'))
                 resp.content_type = 'text/html;charset=utf-8'
                 return resp
-        if isinstance(r,int) and t >= 100 and t < 600:
-            return web.Response(t)
+        if isinstance(r, int) and 100 <= r < 600:
+            return web.Response(r)
         if isinstance(r,tuple) and len(r) == 2:
             t, m = r
-            if isinstance(t,int) and t >= 100 and t < 600:
+            if isinstance(t, int) and 100 <= t < 600:
                 return web.Response(t,str(m))
         # default
         resp = web.Response(body=str(r).encode('utf-8'))
@@ -128,12 +159,16 @@ def datetime_filter(t):
     return u'%s年%s约%s日' % (dt.year,dt.month,dt.day)
 
 #创建Web服务器，并将处理函数注册进其应用路径(Application.router)
-@asyncio.coroutine
+#@asyncio.coroutine
 async def init(loop):
     await orm.create_pool(loop=loop,**configs.db)
-    app = web.Application(loop = loop)  #创建Web服务器实例app，也就是aiohttp.web.Application类的实例，该实例作用是处理URL、HTTP协议
+    app = web.Application(loop = loop,middlewares=[
+        logger_factory,auth_factory,response_factory
+    ])  #创建Web服务器实例app，也就是aiohttp.web.Application类的实例，该实例作用是处理URL、HTTP协议
     init_jinja2(app,filters=dict(datetime=datetime_filter))
-    app.router.add_route('GET','/',index)
+#    app.router.add_route('GET','/',index)
+    add_routes(app,'handlers')
+    add_static(app)
     #将处理函数注册到创建app.router中，router默认为UrlDispatcher实例，UrlDispatcher类中有方法add_route(method,path,handler,*,name=None,expect_handler=None),该方法将处理函数(其参数名为handler)与对应的URL（HTTP方法method,URL路径path）绑定，浏览器敲击URL时返回处理函数的内容
     app_runner = web.AppRunner(app)
     await app_runner.setup()

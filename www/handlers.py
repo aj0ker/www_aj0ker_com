@@ -33,6 +33,7 @@ def get_page_index(page_str):
         p = 1
     return p
 
+# 计算加密cookie
 def user2cookie(user,max_age):
     '''
     Generate cookie str by user.
@@ -48,6 +49,7 @@ def text2html(text):
     lines = map(lambda s: '<p>%s</p>' % s.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;'),filter(lambda s: s.strip() != '',text.split('\n')))
     return ''.join(lines)
 
+# 解密cookie
 @asyncio.coroutine
 def cookie2user(cookie_str):
     '''
@@ -76,6 +78,7 @@ def cookie2user(cookie_str):
         logging.exception(e)
         return None
 
+# 首页
 @get('/')
 def index(*,page='1'):
     page_index = get_page_index(page)
@@ -91,6 +94,7 @@ def index(*,page='1'):
         'blogs':blogs,
     }
 
+# 日志详情页
 @get('/blog/{id}')
 def get_blog(id):
     blog = yield from Blog.find(id)
@@ -104,18 +108,21 @@ def get_blog(id):
         'comments': comments
     }
 
+# 注册页
 @get('/register')
 def register():
     return {
         '__template__': 'register.html'
     }
 
+# 登录页
 @get('/signin')
 def signin():
     return {
         '__template__': 'signin.html'
     }
 
+# 用户登录API
 @post('/api/authenticate')
 def authenticate(*,email,passwd):
     if not email:
@@ -141,6 +148,7 @@ def authenticate(*,email,passwd):
     r.body = json.dumps(user,ensure_ascii=False).encode('utf-8')
     return r
 
+# 注销页
 @get('/signout')
 def signout(request):
     referer = request.headers.get('Referer')
@@ -153,6 +161,7 @@ def signout(request):
 def manage():
     return 'redirect:/manage/comments'
 
+# 评论列表页
 @get('/manage/comments')
 def manage_comments(*,page='1'):
     return {
@@ -160,6 +169,7 @@ def manage_comments(*,page='1'):
         'page_index': get_page_index(page)
     }
 
+# 日志列表页
 @get('/manage/blogs')
 def manage_blogs(*,page='1'):
     return {
@@ -167,6 +177,7 @@ def manage_blogs(*,page='1'):
         'page_index': get_page_index(page)
     }
 
+# 创建日志页
 @get('/manage/blogs/create')
 def manage_create_blog():
     return {
@@ -175,6 +186,7 @@ def manage_create_blog():
         'action': '/api/blogs'
     }
 
+# 修改日志页
 @get('/manage/blogs/edit')
 def manage_edit_blog(*,id):
     return {
@@ -183,6 +195,7 @@ def manage_edit_blog(*,id):
         'action': '/api/blogs/%s' % id
     }
 
+# 用户列表页
 @get('/manage/users')
 def manage_users(*,page='1'):
     return {
@@ -190,6 +203,7 @@ def manage_users(*,page='1'):
         'page_index': get_page_index(page)
     }
 
+# 获取评论
 @get('/api/comments')
 def api_comments(*,page='1'):
     page_index = get_page_index(page)
@@ -200,6 +214,7 @@ def api_comments(*,page='1'):
     comments = yield from Comment.findAll(orderBy='created_at desc',limit=(p.offset,p.limit))
     return dict(page=p,comments=comments)
 
+# 创建评论
 @post('/api/blogs/{id}/comments')
 def api_create_comment(id,request,*,content):
     user = request.__user__
@@ -214,6 +229,7 @@ def api_create_comment(id,request,*,content):
     yield from comment.save()
     return comment
 
+# 删除评论
 @post('/api/comments/{id}/delete')
 def api_delete_comments(id,request):
     check_admin(request)
@@ -223,6 +239,7 @@ def api_delete_comments(id,request):
     yield from c.remove()
     return dict(id=id)
 
+# 获取用户
 @get('/api/users')
 def api_get_users(*,page='1'):
     page_index = get_page_index(page)
@@ -238,6 +255,7 @@ def api_get_users(*,page='1'):
 _RE_EMAIL = re.compile(r'^[a-z0-9\.\-\_]+\@[a-z0-9\-\_]+(\.[a-z0-9\-\_]+){1,4}$')
 _RE_SHA1 = re.compile(r'^[0-9a-f]{40}$')
 
+# 用户注册API
 @post('/api/users')
 def api_register_user(*,email,name,passwd):
     if not name or not name.strip():
@@ -261,6 +279,7 @@ def api_register_user(*,email,name,passwd):
     r.body = json.dumps(user,ensure_ascii=False).encode('utf-8')
     return r
 
+# 获取日志
 @get('/api/blogs')
 def api_blogs(*,page='1'):
     page_index =get_page_index(page)
@@ -276,6 +295,7 @@ def api_get_blog(*,id):
     blog = yield from Blog.find(id)
     return blog
 
+# REST API，用于创建一个blog
 @post('/api/blogs')
 def api_create_blog(request,*,name,summary,content):
     check_admin(request)
@@ -289,6 +309,7 @@ def api_create_blog(request,*,name,summary,content):
     yield from blog.save()
     return blog
 
+# 修改日志
 @post('/api/blogs/{id}')
 def api_update_blog(id,request,*,name,summary,content):
     check_admin(request)
@@ -305,6 +326,7 @@ def api_update_blog(id,request,*,name,summary,content):
     yield from blog.update()
     return blog
 
+# 删除日志
 @post('/api/blog/{id}/delete')
 def api_delete_blog(request,*,id):
     check_admin(request)
